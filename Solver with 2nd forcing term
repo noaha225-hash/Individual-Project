@@ -13,103 +13,104 @@ dz = z(2) - z(1);
 
 %% Turbine forcing f_x(x,z)
 A    = 0.5;
-x0   = Lx/4;
+x1   = Lx/4;      % Turbine 1 location (rename x0 -> x1)
 z0   = 150;
 sigx = 50;
 sigz = 40;
 
 [X,Z] = meshgrid(x, z);
 
-%% Adding in the spacing parameter
-S_list = [25,50,100]
+%% Spacing values
+S_list = [25, 50, 100];  
 
-%% To store results
-x2_list = zeros(size(S_list));
-DU2_list = zeros(size(S_list));
-
-
-fx1 = -A .* exp(-(X-x0).^2/(2*sigx^2)) .* ...
-         exp(-(Z-z0).^2/(2*sigz^2));
-
-%% Second forcing term
-fx2 = -A .* exp(-(X-x2).^2/(2*sigx^2)) .* exp(-(Z-z0).^2/(2*sigz^2));
-
-%%Total Forcing
-fx= fx1+fx2;
-
-
-
-fz = fx .* (-(Z - z0)/sigz^2);
-
-%% FFT in x
-fx_hat = fft(fx, [], 2);
-fz_hat = fft(fz, [], 2);
-
-% Wavenumbers corresponding to FFT ordering
+%% Wavenumbers corresponding to FFT ordering
 kvec = (2*pi/Lx) * [0:(Nx/2-1), -Nx/2:-1];
 
-w_hat = zeros(Nz, Nx);
+%% Loop over spacings
+for is = 1:length(S_list)
 
-%% Loop over Fourier modes
-for ik = 1:Nx
-    k = kvec(ik);
+    S  = S_list(is);
+    x2 = x1 + S;          % Turbine 2 location
+
+    %% Both forcing components
+    fx1 = -A .* exp(-(X-x1).^2/(2*sigx^2)) .* ...
+                exp(-(Z-z0).^2/(2*sigz^2));
+
+    fx2 = -A .* exp(-(X-x2).^2/(2*sigx^2)) .* ...
+                exp(-(Z-z0).^2/(2*sigz^2));
+
+    fx = fx1 + fx2; %%Total forcing
+
     
-    rhs = -1i * k * fz_hat(:,ik);   % Nz x 1 (complex)
+    fz = fx .* (-(Z - z0)/sigz^2);
 
-    % Build matrix L for this k
-    L = zeros(Nz, Nz);
+   
+    fz_hat = fft(fz, [], 2);
+    w_hat  = zeros(Nz, Nx);
 
-    % Bottom BC: w(0) = 0  -> w_1 = 0
-    L(1,1) = 1;
-    rhs(1) = 0;
+    
+    for ik = 1:Nx
+        k = kvec(ik);
+        rhs = -1i * k * fz_hat(:,ik);
 
-    % Interior points j = 2..Nz-1
-    for j = 2:Nz-1
-        L(j,j-1) =  U0/dz^2;
-        L(j,j)   = -2*U0/dz^2 - U0*k^2;
-        L(j,j+1) =  U0/dz^2;
+        L = zeros(Nz, Nz);
+
+        % Bottom BC: w(0) = 0  -> w_1 = 0
+        L(1,1) = 1;
+        rhs(1) = 0;
+
+        % Interior points
+        for j = 2:Nz-1
+            L(j,j-1) =  U0/dz^2;
+            L(j,j)   = -2*U0/dz^2 - U0*k^2;
+            L(j,j+1) =  U0/dz^2;
+        end
+
+        % Top BC: w_z(H) = 0
+        L(Nz,Nz)   =  1;
+        L(Nz,Nz-1) = -1;
+        rhs(Nz)    =  0;
+
+        w_hat(:,ik) = L \ rhs;
     end
 
-    % Top BC: w_z(H) = 0 -> (w_N - w_{N-1})/dz = 0
-    L(Nz, :)    = 0;
-    L(Nz, Nz)   =  1;
-    L(Nz, Nz-1) = -1;
-    rhs(Nz)     = 0;
+    
+    w = real(ifft(w_hat, [], 2));
 
-    % Solve linear system for this Fourier mode
-    w_hat(:,ik) = L \ rhs;
+    %% Calculate u(x,z)
+    Wz = zeros(Nz, Nx);
+
+    for ix = 1:Nx
+        dwdz = zeros(Nz,1);
+        dwdz(2:Nz-1) = (w(3:Nz,ix) - w(1:Nz-2,ix)) / (2*dz);
+        dwdz(1)      = (w(2,ix) - w(1,ix)) / dz;
+        dwdz(Nz)     = 0;
+        Wz(:,ix)     = dwdz;
+    end
+
+    u = zeros(Nz, Nx);
+    for j = 1:Nz
+        u(j,:) = -cumtrapz(x, Wz(j,:));
+    end
+
+    %% Plot spacings
+    figure;
+    imagesc(x/1000, z, u);
+    set(gca,'YDir','normal');
+    xlim([(x1-300)/1000, (x2+300)/1000]);
+    xlabel('x (km)');
+    ylabel('z (m)');
+    title(sprintf('Horizontal velocity disturbance u(x,z), spacing S = %g m', S));
+    colorbar;
+
+    hold on;
+    plot([x1 x1]/1000, [0 H], 'k--', 'LineWidth', 1.5);
+    plot([x2 x2]/1000, [0 H], 'r--', 'LineWidth', 1.5);
+    hold off;
+
 end
 
-% Inverse FFT in x to get w(x,z)
-w = ifft(w_hat, [], 2);
-w = real(w);
 
-%% Calculate u(x,z)
+ 
 
-%Compute dw / dz for each Fourier mode
-Wz = zeros(Nz, Nx);
 
-for ik = 1:Nx
-    wmode = w(:,ik);
-    dwdz  = zeros(Nz,1);
-
-    % interior points: central difference
-    dwdz(2:Nz-1) = ( wmode(3:Nz) - wmode(1:Nz-2) ) / (2*dz);
-
-    % bottom: forward difference
-    dwdz(1) = (wmode(2) - wmode(1)) / dz;
-
-    % top: Neumann BC w_z(H)=0
-    dwdz(Nz) = 0;
-
-    Wz(:,ik) = dwdz;
-end
-
-% Compute u(x,z)
-
-dx = x(2) - x(1);
-u  = zeros(Nz, Nx);
-
-for j = 1:Nz
-    u(j,:) = -cumtrapz(x, Wz(j,:));
-end
