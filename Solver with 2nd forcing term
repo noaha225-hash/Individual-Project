@@ -37,7 +37,7 @@ for is = 1:length(S_list)
                 exp(-(Z-z0).^2/(2*sigz^2));
 
     fx2 = -A .* exp(-(X-x2).^2/(2*sigx^2)) .* ...
-                exp(-(Z-z0).^2/(2*sigz^2));
+                exp(-(Z-z0).^2/(2*sigz^2));  %% Turbine 2 forcing
 
     fx = fx1 + fx2; %%Total forcing
 
