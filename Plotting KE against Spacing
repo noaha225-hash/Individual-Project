@@ -1,0 +1,122 @@
+clear; clc;
+
+%% Parameters
+U0 = 20;
+Lx = 100000;
+H  = 800;
+Nx = 16384;
+Nz = 101;
+
+x  = linspace(0, Lx, Nx);
+z  = linspace(0, H,  Nz);
+dz = z(2) - z(1);
+
+%% Turbine forcing f_x(x,z)
+A    = 0.5;
+x1   = Lx/4;      % Turbine 1 location
+z0   = 150;
+sigx = 50;
+sigz = 40;
+
+[X,Z] = meshgrid(x, z);
+
+%% Spacing values
+S_list = [25,50,100,150,200,250,300,350,400,450,500];
+
+
+kvec = (2*pi/Lx) * [0:(Nx/2-1), -Nx/2:-1];
+
+
+u_def_list   = zeros(size(S_list));   % deficit magnitude at (x2,z0)
+Pproxy_list  = zeros(size(S_list));   % (U0 - u_def)^2
+
+
+%% Loop over spacings
+for is = 1:length(S_list)
+
+    S  = S_list(is);
+    x2 = x1 + S;          % Turbine 2 location
+
+    %% Both forcing components
+    fx1 = -A .* exp(-(X-x1).^2/(2*sigx^2)) .* ...
+                exp(-(Z-z0).^2/(2*sigz^2));
+
+    fx2 = -A .* exp(-(X-x2).^2/(2*sigx^2)) .* ...
+                exp(-(Z-z0).^2/(2*sigz^2));
+
+    fx = fx1 + fx2;
+
+    
+    fz = fx .* (-(Z - z0)/sigz^2);
+
+   
+    fz_hat = fft(fz, [], 2);
+    w_hat  = zeros(Nz, Nx);
+
+    for ik = 1:Nx
+        k = kvec(ik);
+        rhs = -1i * k * fz_hat(:,ik);
+
+        L = zeros(Nz, Nz);
+
+       
+        L(1,1) = 1;
+        rhs(1) = 0;
+
+      
+        for j = 2:Nz-1
+            L(j,j-1) =  U0/dz^2;
+            L(j,j)   = -2*U0/dz^2 - U0*k^2;
+            L(j,j+1) =  U0/dz^2;
+        end
+
+       
+        L(Nz,Nz)   =  1;
+        L(Nz,Nz-1) = -1;
+        rhs(Nz)    =  0;
+
+        w_hat(:,ik) = L \ rhs;
+    end
+
+
+    w = real(ifft(w_hat, [], 2));
+
+    Wz = zeros(Nz, Nx);
+
+    for ix = 1:Nx
+        dwdz = zeros(Nz,1);
+        dwdz(2:Nz-1) = (w(3:Nz,ix) - w(1:Nz-2,ix)) / (2*dz);
+        dwdz(1)      = (w(2,ix) - w(1,ix)) / dz;
+        dwdz(Nz)     = 0;
+        Wz(:,ix)     = dwdz;
+    end
+
+    u = zeros(Nz, Nx);
+    for j = 1:Nz
+        u(j,:) = -cumtrapz(x, Wz(j,:));
+    end
+
+    [~, ix2] = min(abs(x - x2));
+    [~, iz0] = min(abs(z - z0));
+
+   
+    u_dist_at_T2 = u(iz0, ix2);
+
+    u_def = -u_dist_at_T2;
+
+
+    u_def_list(is)  = u_def;
+    Pproxy_list(is) = (U0 - u_def)^2;
+
+   
+
+end
+
+%% Plot (U0 - u)^2 vs spacing
+figure;
+plot(S_list, Pproxy_list, '-o', 'LineWidth', 2, 'MarkerSize', 6);
+xlabel('Turbine spacing, S (m)');
+ylabel('Available Energy, (U_0 - u)^2');
+title('Turbine Spacing on available Energy at Turbine 2');
+grid on;
+
